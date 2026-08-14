@@ -1,0 +1,254 @@
+---
+title: "2020-12-31_prepare_seuratObj"
+author: "Yifang Liu"
+date: "`r Sys.Date()`"
+output:
+  rmdformats::html_clean:
+    code_folding: hide
+    fig_width: 7
+    fig_height: 7
+    highlight: kate
+    thumbnails: false
+    lightbox: true
+    gallery: true
+---
+
+```{r knitr_init, echo=FALSE, cache=FALSE}
+library(knitr)
+library(rmdformats)
+
+options(max.print = 200)
+opts_chunk$set(echo = TRUE,
+               cache = FALSE,
+               prompt = FALSE,
+               tidy = TRUE,
+               comment = NA,
+               message = FALSE,
+               warning = FALSE,
+               dev = c("png", "pdf"),
+               fig.width = 7,
+               fig.height = 7,
+               fig.align = "center",
+               # fig.path = 'PDF/',
+               dpi = 72)
+opts_knit$set(width = 75)
+```
+
+# Update
+
+2020-12-31:
+
+  * another_version_of_clustering_with_only_E_A_R_samples_re-analyzed_without_IdhR195H
+
+```{r setup}
+set.seed(123)
+
+# theta1 <- 2
+# theta2 <- 5
+# theta <- c(theta1, theta2)
+output_dir <- "../Data"
+if (!dir.exists(output_dir)) {dir.create(output_dir)}
+
+output_dir <- "../Result"
+if (!dir.exists(output_dir)) {dir.create(output_dir)}
+
+pt_size <- 1
+npc <- 20
+theta <- 2
+
+library(reticulate)
+py_config()
+
+# Suppress loading messages
+suppressPackageStartupMessages({
+  library(Matrix)
+  library(dplyr)
+  library(tidyverse)
+  library(Seurat)
+  library(cowplot)
+  library(Rcpp)
+  library(harmony)
+})
+```
+
+# Prepare matrix
+
+```{r E}
+id <- "-1"
+matrix_dir <- "../../2020-12-22_scRNA-seq_get_all_cells_to_same_number_10k/E/filtered_feature_bc_matrix/"
+barcode.path <- paste0(matrix_dir, "barcodes.tsv.gz")
+features.path <- paste0(matrix_dir, "features.tsv.gz")
+matrix.path <- paste0(matrix_dir, "matrix.mtx.gz")
+mat <- readMM(file = matrix.path)
+feature.names <- read.delim(features.path,
+                           header = FALSE)
+barcode.names <- read.delim(barcode.path,
+                           header = FALSE)
+colnames(mat) <- gsub("-1", id, barcode.names$V1)
+rownames(mat) <- feature.names$V2
+matrix_E <- mat
+matrix_E[1:3, 1:3]
+```
+
+```{r A}
+id <- "-2"
+matrix_dir <- "../../2020-12-22_scRNA-seq_get_all_cells_to_same_number_10k/A/filtered_feature_bc_matrix/"
+barcode.path <- paste0(matrix_dir, "barcodes.tsv.gz")
+features.path <- paste0(matrix_dir, "features.tsv.gz")
+matrix.path <- paste0(matrix_dir, "matrix.mtx.gz")
+mat <- readMM(file = matrix.path)
+feature.names <- read.delim(features.path,
+                           header = FALSE)
+barcode.names <- read.delim(barcode.path,
+                           header = FALSE)
+colnames(mat) <- gsub("-1", id, barcode.names$V1)
+rownames(mat) <- feature.names$V2
+matrix_A <- mat
+matrix_A[1:3, 1:3]
+```
+
+```{r R}
+id <- "-3"
+matrix_dir <- "../../2020-12-22_scRNA-seq_get_all_cells_to_same_number_10k/R/filtered_feature_bc_matrix/"
+barcode.path <- paste0(matrix_dir, "barcodes.tsv.gz")
+features.path <- paste0(matrix_dir, "features.tsv.gz")
+matrix.path <- paste0(matrix_dir, "matrix.mtx.gz")
+mat <- readMM(file = matrix.path)
+feature.names <- read.delim(features.path,
+                           header = FALSE)
+barcode.names <- read.delim(barcode.path,
+                           header = FALSE)
+colnames(mat) <- gsub("-1", id, barcode.names$V1)
+rownames(mat) <- feature.names$V2
+matrix_R <- mat
+matrix_R[1:3, 1:3]
+```
+
+```{r combine}
+matrix_combine <- cbind(matrix_E,
+                        matrix_A,
+                        matrix_R)
+saveRDS(matrix_combine, file = "../Data/2020-12-31_matrix_combine.Rds")
+```
+
+# Read in
+
+```{r}
+matrix <- readRDS("../Data/2020-12-31_matrix_combine.Rds")
+```
+
+# Seurat
+
+```{r initialize}
+seuratObj <- CreateSeuratObject(counts = matrix)
+seuratObj <- NormalizeData(seuratObj, verbose = FALSE)
+seuratObj <- FindVariableFeatures(seuratObj, selection.method = "vst", nfeatures = 2000)
+all_genes <- rownames(seuratObj)
+seuratObj <- ScaleData(seuratObj, features = all_genes, verbose = FALSE)
+seuratObj <- RunPCA(seuratObj, features = VariableFeatures(object = seuratObj), verbose = FALSE)
+ElbowPlot(seuratObj, ndims = 50)
+```
+
+# metadata
+
+```{r}
+# metadata
+seuratObj$percent_mito <- PercentageFeatureSet(seuratObj, pattern = "^mt:")
+seuratObj$log2nGene <- log2(seuratObj$nFeature_RNA)
+seuratObj$log2nUMI <- log2(seuratObj$nCount_RNA)
+
+seuratObj$Sample <- c(
+  rep("E", sum(grepl("-1$", colnames(seuratObj)))),
+  rep("A", sum(grepl("-2$", colnames(seuratObj)))),
+  rep("R", sum(grepl("-3$", colnames(seuratObj))))
+)
+
+my_levels <- c("E", "A", "R")
+
+seuratObj$Sample <- factor(x = seuratObj$Sample, levels = my_levels)
+
+# need change metadata output name
+write.csv(seuratObj@meta.data, file = "../Data/2020-12-31_metadata.csv")
+
+p1 <- DimPlot(object = seuratObj, reduction = "pca", pt.size = 0.1, group.by = "Sample")
+p2 <- VlnPlot(object = seuratObj, features = "PC_1", group.by = "Sample", pt.size = 0.1)
+plot_grid(p1, p2)
+```
+
+# Harmony (theta = `r theta`)
+
+```{r}
+# Warning message for Quick-TRANSfer #25
+# https://github.com/immunogenomics/harmony/issues/25
+
+seuratObj <- seuratObj %>%
+  RunHarmony("Sample", theta = theta, plot_convergence = TRUE)
+
+p1 <- DimPlot(object = seuratObj, reduction = "harmony", pt.size = 0.1, group.by = "Sample")
+p2 <- VlnPlot(object = seuratObj, features = "harmony_1", group.by = "Sample", pt.size = 0.1)
+plot_grid(p1, p2)
+```
+
+# Sample - UMAP {.tabset}
+
+## Sample
+
+```{r libraryid_umap}
+seuratObj <- RunUMAP(seuratObj, reduction = "harmony", dims = 1:npc)
+# DimPlot(seuratObj, reduction = "umap", group.by = "Sample", pt.size = pt_size)
+DimPlot(seuratObj, reduction = "umap", group.by = "Sample", pt.size = pt_size, split.by = "Sample")
+```
+
+```{r rest_analysis}
+# seuratObj <- RunTSNE(seuratObj, reduction = "harmony", dims = 1:npc)
+# DimPlot(seuratObj, reduction = "tsne", group.by = "Sample", pt.size = pt_size, split.by = "Sample")
+
+seuratObj <- FindNeighbors(seuratObj, reduction = "harmony", dims = 1:npc, verbose = FALSE, force.recalc = TRUE)
+seuratObj <- FindClusters(seuratObj, resolution = seq(0.1, 1, 0.1), verbose = FALSE)
+
+saveRDS(seuratObj, file = "../Data/2020-12-31_seuratObj.Rds")
+```
+
+# Export to Loupe Browser
+
+```{r}
+umap <- cbind("Barcode" = rownames(Embeddings(object = seuratObj, reduction = "umap")), Embeddings(object = seuratObj, reduction = "umap"))
+write.table(umap, file="../Data/2020-12-31_UMAP.csv", sep = ",", quote = F, row.names = F, col.names = T)
+
+# tsne <- cbind("Barcode" = rownames(Embeddings(object = seuratObj, reduction = "tsne")), Embeddings(object = seuratObj, reduction = "tsne"))
+# write.table(tsne, file="../Data/2020-12-31_TSNE.csv", sep = ",", quote = F, row.names = F, col.names = T)
+
+metadata <- seuratObj@meta.data
+colnames(metadata)
+metadata <- metadata[ , -c(1:7)]
+metadata$seurat_clusters <- NULL
+metadata <- cbind(barcode = rownames(metadata), metadata)
+
+write.table(metadata, file="../Data/2020-12-31_clusters.csv", sep = ",", quote = F, row.names = F, col.names = T)
+
+```
+
+# Notes
+
+2020-12-24:
+
+  * seuratObj for E A I R 10k scRNA-seq
+
+2020-12-20:
+
+  * seuratObj for E A I R 10k
+
+2020-12-19:
+
+  * seuratObj for E A I R
+
+2020-11-21:
+
+  * prepare seuratObj
+
+# Session Info
+
+```{r sessioninfo, message=TRUE}
+sessionInfo()
+```
+
