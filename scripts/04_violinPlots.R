@@ -3,24 +3,12 @@ library(dplyr)
 library(ggplot2)
 library(patchwork)
 
-# Read in
-mat <- read.delim('data/matrix_GEO.txt', check.names = FALSE, row.names = 1)
-meta <- read.delim('data/metadata_GEO.txt')
-
-# Make Seurat
-meta <- meta %>% filter(!barcode == '')
-rownames(meta) <- meta$barcode
-mat <- as.matrix(mat)
-all(colnames(mat) == rownames(meta))
-seuObj <- CreateSeuratObject(mat, meta.data = meta)
-
+seuObj <- readRDS('data/yifang_seuratObj.rds')
 Idents(seuObj) <- 'cluster'
 
 meta <- seuObj@meta.data
 meta <- meta %>% mutate(sample = ifelse(sample == 'Empty_control', 'Control', sample))
 seuObj@meta.data <- meta
-
-seuObj <- NormalizeData(seuObj)
 
 # Violin plots - one plot for each sample, separated by cell type
 samps <- c('Control', 'AML1-ETO', 'RasV12')
