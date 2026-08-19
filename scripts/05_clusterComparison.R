@@ -133,7 +133,7 @@ ggsave('results/clusterComparison/top5all_enrichment_heatmap_ar.png', width = 12
 # Our clusters
 min_p <- min(markers$p_val_adj[markers$p_val_adj > 0], na.rm = TRUE) # Set minimum p-value to handle zeroes
 
-# Convert to matrix with values being adjusted p-values
+# Convert to matrix with values being -log10 of adjusted p-values
 markers_df <- markers %>% 
   mutate(p_val_adj = ifelse(p_val_adj == 0, min_p, p_val_adj),
          log10p = -log10(p_val_adj)) %>%
@@ -175,8 +175,69 @@ big_heatmap <- markers_df %>%
 pheatmap(big_heatmap,
          use_raster = TRUE,
          cluster_cols = FALSE,
+         color = colorRampPalette(c("palegoldenrod", "chocolate4"))(50),
+         na_col = 'gray95',
          show_rownames = FALSE,
          main = 'Heatmap of Markers per Cluster',
          name = '-log10(adj. p-value)')
 
-  
+# TOP 200 ONLY
+# our clusters
+min_p <- min(markers$p_val_adj[markers$p_val_adj > 0], na.rm = TRUE) # Set minimum p-value to handle zeroes
+
+# Convert to matrix with values being -log10 of adjusted p-values
+markers_df <- markers %>% 
+  group_by(cluster) %>%
+  slice_min(order_by = p_val_adj, n = 200, with_ties = FALSE) %>%
+  ungroup() %>%
+  mutate(p_val_adj = ifelse(p_val_adj == 0, min_p, p_val_adj),
+         log10p = -log10(p_val_adj)) %>%
+  dplyr::select(log10p, cluster, gene) %>%
+  pivot_wider(names_from = cluster, values_from = log10p) %>%
+  dplyr::select(gene, PM1, PM2, PM3, PM4, PM5, PM6, PM7, PM8, PM9)
+markers_df[is.na(markers_df)] <- 0
+
+# Cho clusters
+min_p_cho <- min(cho$padj[cho$padj > 0], na.rm = TRUE) 
+
+cho_markers_df <- cho %>%
+  filter(padj < 0.05) %>%
+  slice_min(order_by = padj, n = 200, with_ties = FALSE) %>%
+  mutate(padj = ifelse(padj == 0, min_p_cho, padj),
+         log10p = -log10(padj)) %>%
+  dplyr::select(log10p, cluster_name, gene_symbol) %>%
+  pivot_wider(names_from = cluster_name, values_from = log10p) %>%
+  rename(gene = gene_symbol, Cho_PM = PM)
+
+# Fu clusters
+min_p_fu <- min(fu$padj[fu$padj > 0], na.rm = TRUE) 
+
+fu_markers_df <- fu %>%
+  filter(padj < 0.05) %>%
+  group_by(cluster_name) %>%
+  slice_min(order_by = padj, n = 200, with_ties = FALSE) %>%
+  ungroup() %>%
+  mutate(padj = ifelse(padj == 0, min_p_fu, padj),
+         log10p = -log10(padj)) %>%
+  dplyr::select(log10p, cluster_name, gene_symbol) %>%
+  rename(gene = gene_symbol) %>%
+  pivot_wider(names_from = cluster_name, values_from = log10p)
+
+# Combine
+big_heatmap <- markers_df %>%
+  left_join(cho_markers_df, by = 'gene') %>%
+  left_join(fu_markers_df, by = 'gene') %>%
+  tibble::column_to_rownames('gene') %>%
+  select(10:14,1:9) %>%
+  as.matrix()
+
+png('results/clusterComparison/marker_heatmap_top200.png', width = 12, height = 8, units = 'in', res = 300)
+pheatmap(big_heatmap,
+         use_raster = TRUE,
+         cluster_cols = FALSE,
+         color = colorRampPalette(c("palegoldenrod", "chocolate4"))(50),
+         na_col = 'gray95',
+         show_rownames = FALSE,
+         main = 'Heatmap of Top 200 Markers per Cluster',
+         name = '-log10(adj. p-value)')
+dev.off()
