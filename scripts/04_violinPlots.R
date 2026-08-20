@@ -3,7 +3,7 @@ library(dplyr)
 library(ggplot2)
 library(patchwork)
 
-seuObj <- readRDS('data/yifang_seuratObj.rds')
+seuObj <- readRDS('data/seuratObj.rds')
 Idents(seuObj) <- 'cluster'
 
 meta <- seuObj@meta.data
@@ -49,6 +49,3 @@ for (i in 1:length(clusts)) {
 
 combined_plot <- wrap_plots(plots, ncol = 4)
 ggsave('results/violinPlots/Mrtf_by_cluster.png', combined_plot, width = 18, height = 12)
-
-plots_of_int <- wrap_plots(list(plots[[4]], plots[[7]]), ncol = 2)
-ggsave('results/violinPlots/Mrtf_PM3_LM2.png', plots_of_int, width = 12, height = 6)
