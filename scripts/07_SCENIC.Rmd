@@ -1,0 +1,192 @@
+---
+title: "SCENIC"
+date: "`r Sys.Date()`"
+output:
+  rmdformats::html_clean:
+    code_folding: hide
+    fig_width: 3.5
+    fig_height: 3.5
+    highlight: kate
+    thumbnails: false
+    lightbox: true
+    gallery: true
+---
+
+```{r knitr_init, echo=FALSE, cache=FALSE}
+# R -e rmarkdown::render"('SCENIC.Rmd', output_file = 'SCENIC.html')"
+
+library(knitr)
+library(rmdformats)
+
+options(max.print = 200)
+opts_chunk$set(echo = TRUE,
+               cache = FALSE,
+               prompt = FALSE,
+               tidy = TRUE,
+               comment = NA,
+               message = FALSE,
+               warning = FALSE,
+               dev = c("png", "pdf"),
+               fig.width = 3.5,
+               fig.height = 3.5,
+               fig.align = "center",
+               # fig.path = 'PDF_/',
+               dpi = 72)
+opts_knit$set(width = 75)
+```
+
+# Prepare Data
+
+```{r setup}
+set.seed(123)
+
+suppressPackageStartupMessages({
+  library(Matrix)
+  library(dplyr)
+  library(Seurat)
+  library(RColorBrewer)
+  library(SCENIC)
+  library(doParallel)
+  library(SCopeLoomR)
+  library(dplyr)
+})
+```
+
+```{r load}
+seuratObj <- readRDS("../data/yifang_seuratObj.Rds")
+
+seuratObj <- subset(seuratObj, cluster %in% c('PM4', 'LM2'))
+# seuratObj <- subset(seuratObj, sample != 'Empty_control') # Only 15 cells
+
+metadata <- seuratObj@meta.data %>% rename(Sample = sample)
+
+Idents(seuratObj) <- 'cluster'
+
+mat <- GetAssayData(object = seuratObj, layer = "counts") %>% as.matrix()
+
+cellInfo <- metadata[ , c("Sample", 'cluster')]
+```
+
+```{r}
+colnames(cellInfo)[2] <- "CellType"
+
+cellInfo$CellType <- as.factor(cellInfo$CellType)
+
+str(cellInfo)
+```
+
+```{r}
+saveRDS(mat, file = "exprMat.Rds")
+saveRDS(cellInfo, file = "cellInfo.Rds")
+```
+
+# Run SCENIC
+
+```{r load}
+# cores <- 8
+
+exprMat <- readRDS(file = "exprMat.Rds")
+cellInfo <- readRDS(file = "cellInfo.Rds")
+
+dim(exprMat)
+
+# Cell info/phenodata
+head(cellInfo)
+str(cellInfo)
+```
+
+```{r}
+x <- table(cellInfo$CellType) %>% as.data.frame()
+```
+
+
+```{r}
+dir.create("int")
+saveRDS(cellInfo, file="int/cellInfo.Rds")
+
+# https://sashamaps.net/docs/tools/20-colors/
+# brewer.pal(10, "Set1")
+
+# Color to assign to the variables (same format as for NMF::aheatmap)
+colVars <- list(CellType = c("LM2" = "#fa6831",
+                             "PM4" = "#4363d8"))
+
+colVars$CellType <- colVars$CellType[intersect(names(colVars$CellType), cellInfo$CellType)]
+saveRDS(colVars, file="int/colVars.Rds")
+plot.new(); legend(0,1, fill=colVars$CellType, legend=names(colVars$CellType))
+
+```
+
+```{r}
+# Initialize SCENIC settings
+# system("ln -s /Users/m/Tmp/RH/regulon/cisTarget_databases databases")
+org <- "dmel" # or hgnc, or dmel
+# dbDir <- "/Users/yifang/Projects/With/Josh/cisTarget_databases/dm6"
+dbDir <- "/n/groups/flyrnai/jenna/scRNA/with/Sudhir/leukemia_reanalysis/SCENIC/dm6" # O2
+
+myDatasetTitle <- "SCENIC" # choose a name for your analysis
+data(defaultDbNames)
+dbs <- defaultDbNames[[org]]
+cores <- 8
+scenicOptions <- initializeScenic(org = org,
+                                  dbDir = dbDir,
+                                  dbs = dbs,
+                                  datasetTitle = myDatasetTitle,
+                                  nCores = cores)
+scenicOptions@settings$verbose <- TRUE
+scenicOptions@settings$seed <- 123
+
+```
+
+```{r}
+# Modify if needed
+scenicOptions@inputDatasetInfo$cellInfo <- "int/cellInfo.Rds"
+scenicOptions@inputDatasetInfo$colVars <- "int/colVars.Rds"
+
+# Save to use at a later time...
+saveRDS(scenicOptions, file="int/scenicOptions.Rds")
+```
+
+```{r}
+### Co-expression network
+genesKept <- geneFiltering(exprMat,
+                           scenicOptions = scenicOptions,
+                           minCountsPerGene = ncol(exprMat) * 0.01 * 0.5,
+                           minSamples = ncol(exprMat) * 0.01 * 0.5
+                           )
+exprMat_filtered <- exprMat[genesKept, ]
+dim(exprMat_filtered)
+
+# "Pepck" %in% row.names(exprMat_filtered)
+
+loom <- build_loom("exprMat_filtered.loom", dgem = exprMat_filtered)
+close_loom(loom)
+
+# run grn on O2
+
+GRNBoost_output <- read.delim("adj.tsv")
+colnames(GRNBoost_output) <- c("TF", "Target", "weight")
+saveRDS(GRNBoost_output, file="int/1.4_GENIE3_linkList.Rds")
+
+runCorrelation(exprMat_filtered, scenicOptions)
+
+# exprMat_filtered <- log2(exprMat_filtered + 1)
+# runGenie3(exprMat_filtered, scenicOptions)
+# scenicOptions@settings$dbs <- scenicOptions@settings$dbs["5kbUpTx"] # modified
+
+runSCENIC_1_coexNetwork2modules(scenicOptions)
+runSCENIC_2_createRegulons(scenicOptions)
+
+scenicOptions@settings$nCores <- 1
+
+exprMat_log <- log2(exprMat + 1)
+runSCENIC_3_scoreCells(scenicOptions, exprMat_log)
+runSCENIC_4_aucell_binarize(scenicOptions)
+```
+
+# Session Info
+
+```{r sessioninfo, message=TRUE}
+sessionInfo()
+```
+
