@@ -5,5 +5,4 @@ Code used in the bioinformatics analysis for "A comparative single-cell transcri
 
 **scripts** contains all scripts used for bioinformatics analysis.
 
-**data** contains supplementary files with the markers for the Cho et al. (2020) and Fu et al. (2020) papers that
-were used to compare the PM4 cluster to defined clusters in literature.
+**data** contains supplementary files with the markers for the Cho et al. (2020), Fu et al. (2020), and Tattikota et al. (2020) papers thatwere used to compare the PM4 cluster to defined clusters in literature.
